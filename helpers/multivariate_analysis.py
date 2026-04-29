@@ -4,17 +4,32 @@ import pandas as pd
 from typing import Dict, List, Tuple
 import statsmodels.api as sm
 
+from scripts.src.helpers.coefficient_plotter import CoefficientPlotter
+from .transformator import Transformator
+
 class MultivariateAnalysis:
     # Reuse the same variables and mapping from UnivariateAnalysis and BivariateAnalysis
     VARIABLES = ['mean_nn', 'sd_nn', 'mean_sbp', 'sd_sbp']
     VARIABLE_MAPPING = {
-        'mean_nn': {'full_name': 'Mean NN', 'abv': 'meanNN'},
-        'sd_nn': {'full_name': 'SD NN', 'abv': 'sdNN'},
+        'mean_nn': {'full_name': 'Mean IBI', 'abv': 'meanIBI'},
+        'sd_nn': {'full_name': 'SD IBI', 'abv': 'sdIBI'},
         'mean_sbp': {'full_name': 'Mean SBP', 'abv': 'meanSBP'},
         'sd_sbp': {'full_name': 'SD SBP', 'abv': 'sdSBP'},
     }
 
-    def __init__(self, database: str, mnv: float, mhv: float):
+    groups_translation = {
+        'DMA': 'T2DA',
+        'DMB': 'T2DB',
+    }
+    
+    LINE_STYLE_FOR_VARIABLES = {
+        'mean_nn': {'color': 'red', 'linestyle': '-'},
+        'sd_nn': {'color': 'red', 'linestyle': '--'},
+        'mean_sbp': {'color': 'blue', 'linestyle': '-'},
+        'sd_sbp': {'color': 'blue', 'linestyle': '--'},
+    }
+
+    def __init__(self, database: str, mnv: float, mhv: float, transform: str = None):
         """
         Initialize MultivariateAnalysis class.
         
@@ -27,8 +42,10 @@ class MultivariateAnalysis:
         self.mnv = mnv
         self.mhv = mhv
         self.data = self._load_data()
-        self.data = self._normalize_data()
         self.data = self._create_bp_population()
+        if transform is not None:
+            self.data = Transformator.transform_data_by_group(self.data, self.VARIABLES, transform)
+        self.data = self._normalize_data()
 
     def _normalize_data(self) -> pd.DataFrame:
         """Normalize the data. Only variable columns"""
@@ -52,29 +69,31 @@ class MultivariateAnalysis:
         self.data['bp_population'] = np.select(conditions, values, default='unknown')
         return self.data
 
-    def _perform_multiple_regression(self, y: np.ndarray, X: np.ndarray) -> str:
+    def _perform_multiple_regression(self, y: np.ndarray, X: np.ndarray, independent_vars: List[str]) -> Tuple[str, object]:
         """
-        Perform multiple linear regression using statsmodels and return summary.
+        Perform multiple linear regression using statsmodels and return summary and results object.
         
         Args:
             y: Dependent variable
             X: Independent variables matrix
+            independent_vars: List of independent variable names
             
         Returns:
-            String containing OLS regression summary or None if insufficient data
+            Tuple containing (summary_string, results_object) or (None, None) if insufficient data
         """
         if len(y) < len(X[0]) + 2:  # Need at least n_features + 2 observations
-            return None
+            return None, None
         
-        # Add constant term for intercept
-        X_with_const = sm.add_constant(X)
+        # Convert X to DataFrame with column names
+        X_df = pd.DataFrame(X, columns=independent_vars)
+        X_with_const = sm.add_constant(X_df)
         
         # Fit the OLS model
         model = sm.OLS(y, X_with_const)
         results = model.fit()
         
-        # Return the summary as string
-        return str(results.summary())
+        # Return both summary string and results object
+        return str(results.summary()), results
 
     def perform_multivariate_analysis(self) -> Dict[str, Dict[str, Dict[str, Dict]]]:
         """
@@ -86,7 +105,11 @@ class MultivariateAnalysis:
         """
         results = {}
         bp_populations = ['normal_bp', 'intermediate_bp', 'high_bp']
-        
+        # print all existing bp_populations with count
+        print(self.data['bp_population'].unique(), self.data['bp_population'].value_counts())
+        # print all existing population_groups with count
+        print(self.data['population_group'].unique(), self.data['population_group'].value_counts())
+        # exit()
         for bp_pop in bp_populations:
             bp_data = self.data[self.data['bp_population'] == bp_pop]
             if len(bp_data) < 2:
@@ -112,13 +135,14 @@ class MultivariateAnalysis:
                     X = group_data[independent_vars].values
                     
                     # Perform regression
-                    regression_summary = self._perform_multiple_regression(y, X)
+                    regression_summary, regression_results = self._perform_multiple_regression(y, X, independent_vars)
                     
                     # Store results with variable names
                     results[bp_pop][pop_group][dependent_var] = {
                         'dependent_variable': dependent_var,
                         'independent_variables': independent_vars,
-                        'summary': regression_summary
+                        'summary': regression_summary,
+                        'results_object': regression_results
                     }
         
         return results
@@ -139,9 +163,8 @@ class MultivariateAnalysis:
         for bp_pop, pop_groups in results.items():
             for pop_group, dependent_vars in pop_groups.items():
                 output_file = f'results/multivariate_analysis/multivariate_{self.database}_{bp_pop}_{pop_group}.txt'
-                
                 with open(output_file, 'w') as f:
-                    f.write(f"Multiple Regression Analysis Results\n")
+                    f.write("Multiple Regression Analysis Results\n")
                     f.write(f"Database: {self.database}\n")
                     f.write(f"Blood Pressure Population: {bp_pop.replace('_', ' ').title()}\n")
                     f.write(f"Population Group: {pop_group}\n")
@@ -150,6 +173,31 @@ class MultivariateAnalysis:
                     for dependent_var, analysis in dependent_vars.items():
                         dependent_name = self.VARIABLE_MAPPING[dependent_var]['abv']
                         independent_names = [self.VARIABLE_MAPPING[var]['abv'] for var in analysis['independent_variables']]
+
+                        # Example: Get parameters from actual regression results instead of hardcoding
+                        params = self.get_regression_parameters_for_plot(
+                            bp_population=bp_pop,  # or 'intermediate_bp', 'high_bp'
+                            population_group=pop_group,  # Use actual population group from your data
+                            dependent_variable=dependent_var
+                        )
+                        pop_group_for_path = self.groups_translation.get(pop_group, pop_group)
+                        if params is not None:
+                            CoefficientPlotter(variable_name_mapping=self.VARIABLE_MAPPING, 
+                                             line_style_for_variables=self.LINE_STYLE_FOR_VARIABLES).plot_coefficients(
+                                coefficients_dict=params['coefficients_dict'],
+                                coefficients_p_values=params['coefficients_p_values'],
+                                model_p_value=params['model_p_value'],
+                                model_r_squared=params['model_r_squared'],
+                                population_group=params['population_group'],
+                                condition=params['condition'],
+                                dependent_variable=params['dependent_variable'],
+                                x_range=[-2, 2],
+                                y_range=[-2.5, 2.5],
+                                extra_info=False,
+                                save_path=f'results/multivariate_analysis/coeficients_graphs/{self.database}/coef_graph_{self.database}_{dependent_var}_{bp_pop}_{pop_group_for_path}.png'
+                            )
+                        else:
+                            print("No regression results found for the specified parameters")
                         
                         f.write(f"{dependent_name}({','.join(independent_names)})\n")
                         f.write("-" * 50 + "\n")
@@ -160,6 +208,7 @@ class MultivariateAnalysis:
                             f.write("Insufficient data for analysis\n")
                         
                         f.write("\n" + "=" * 80 + "\n\n")
+
 
     def get_summary_table(self) -> pd.DataFrame:
         """
@@ -219,4 +268,106 @@ class MultivariateAnalysis:
                     f.write(f"{current_pop_group}\n")
                 
                 if row['regression_equation']:  # Regression equation
-                    f.write(f"{row['regression_equation']}\n") 
+                    f.write(f"{row['regression_equation']}\n")
+    
+    def create_coefficient_plots(self, output_directory: str = 'results/multivariate_analysis/coefficient_plots', 
+                                significance_level: float = 0.05, extra_info: bool = False):
+        """
+        Create coefficient plots for all regression results.
+        
+        Args:
+            output_directory: Directory to save the plots
+            significance_level: P-value threshold for significance (default: 0.05)
+            extra_info: Whether to include coefficient values in labels
+        """
+        # Get regression results
+        results = self.perform_multivariate_analysis()
+        
+        # Create output directory
+        os.makedirs(output_directory, exist_ok=True)
+        
+        # Initialize coefficient plotter
+        plotter = CoefficientPlotter(
+            variable_name_mapping=self.VARIABLE_MAPPING,
+            line_style_for_variables=self.LINE_STYLE_FOR_VARIABLES,
+            significance_level=significance_level
+        )
+        
+        all_regression_coordinates = {}
+        for bp_pop, pop_groups in results.items():
+            for pop_group, dependent_vars in pop_groups.items():
+                for dependent_var, analysis in dependent_vars.items():
+                    # Skip if no results object (insufficient data)
+                    if analysis['results_object'] is None:
+                        continue
+                    
+                    results_obj = analysis['results_object']
+                    
+                    # Extract coefficients and p-values (excluding constant)
+                    coefficients_dict = results_obj.params.drop('const').to_dict()
+                    coefficients_p_values = results_obj.pvalues.drop('const').to_dict()
+                    model_p_value = results_obj.f_pvalue
+                    model_r_squared = results_obj.rsquared
+                    # Create filename
+                    output_directory = f'results/multivariate_analysis/coefficient_plots/{self.database}'
+                    filename = f'coefficients_{bp_pop}_{pop_group}_{dependent_var}.png'
+                    save_path = os.path.join(output_directory, filename)
+                    
+                    # Create plot
+                    coords = plotter.plot_coefficients(
+                        coefficients_dict=coefficients_dict,
+                        coefficients_p_values=coefficients_p_values,
+                        model_p_value=model_p_value,
+                        model_r_squared=model_r_squared,
+                        population_group=pop_group,
+                        condition=bp_pop,
+                        dependent_variable=dependent_var,
+                        extra_info=extra_info,
+                        save_path=save_path
+                    )
+                    
+                    # Store coordinates
+                    all_regression_coordinates.update(coords)
+                    
+                    print(f"Created coefficient plot: {filename}")
+        
+        return all_regression_coordinates
+    
+    def get_regression_parameters_for_plot(self, bp_population: str, population_group: str, dependent_variable: str):
+        """
+        Extract regression parameters for a specific analysis to use in coefficient plots.
+        
+        Args:
+            bp_population: Blood pressure population ('normal_bp', 'intermediate_bp', 'high_bp')
+            population_group: Population group (e.g., '18-29y', 'Control', etc.)
+            dependent_variable: Dependent variable name
+            
+        Returns:
+            Dictionary with coefficients_dict, coefficients_p_values, and model_p_value
+        """
+        results = self.perform_multivariate_analysis()
+        
+        try:
+            analysis = results[bp_population][population_group][dependent_variable]
+            results_obj = analysis['results_object']
+            
+            if results_obj is None:
+                return None
+            
+            # Extract parameters
+            coefficients_dict = results_obj.params.drop('const').to_dict()
+            coefficients_p_values = results_obj.pvalues.drop('const').to_dict()
+            model_p_value = results_obj.f_pvalue
+            model_r_squared = results_obj.rsquared           
+            return {
+                'coefficients_dict': coefficients_dict,
+                'coefficients_p_values': coefficients_p_values,
+                'model_p_value': model_p_value,
+                'model_r_squared': model_r_squared,
+                'population_group': population_group,
+                'condition': bp_population,
+                'dependent_variable': dependent_variable
+            }
+        except KeyError as e:
+            print(f"Analysis not found for {bp_population}, {population_group}, {dependent_variable}: {e}")
+            return None 

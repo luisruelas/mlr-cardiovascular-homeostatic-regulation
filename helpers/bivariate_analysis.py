@@ -5,18 +5,28 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from typing import Dict, List
 from scipy import stats  # Add this import at the top
+try:
+    from .transformator import Transformator
+except ImportError:
+    from transformator import Transformator
+from matplotlib import colors
+import statsmodels.api as sm
 
 class BivariateAnalysis:
+    font_size = 18
     # Reuse the same variables and mapping from UnivariateAnalysis
     VARIABLES = ['mean_nn', 'sd_nn', 'mean_sbp', 'sd_sbp']
     VARIABLE_MAPPING = {
-        'mean_nn': {'full_name': 'Mean NN', 'abv': 'meanIBI'},
-        'sd_nn': {'full_name': 'SD NN', 'abv': 'sdIBI'},
-        'mean_sbp': {'full_name': 'Mean SBP', 'abv': 'meanSBP'},
-        'sd_sbp': {'full_name': 'SD SBP', 'abv': 'sdSBP'},
+        'mean_nn': {'full_name': 'meanIBI', 'abv': 'meanIBI'},
+        'sd_nn': {'full_name': 'sdIBI', 'abv': 'sdIBI'},
+        'mean_sbp': {'full_name': 'meanSBP', 'abv': 'meanSBP'},
+        'sd_sbp': {'full_name': 'sdSBP', 'abv': 'sdSBP'},
     }
+    positions = [0, 0.5, 1]
+    cmap_colors = [(103/255, 169/255, 207/255), (247/255, 247/255, 247/255), (239/255, 138/255, 98/255)]
+    cmap = colors.LinearSegmentedColormap.from_list('custom_warm', list(zip(positions, cmap_colors)), N=256)
 
-    def __init__(self, database: str, mnv: float, mhv: float):
+    def __init__(self, database: str, mnv: float, mhv: float, transform: str = None, pearson_r_threshold: float = 0.5):
         """
         Initialize BivariateAnalysis class.
         
@@ -28,8 +38,11 @@ class BivariateAnalysis:
         self.database = database
         self.mnv = mnv
         self.mhv = mhv
+        self.pearson_r_threshold = pearson_r_threshold
         self.data = self._load_data()
         self.data = self._create_bp_population()
+        if transform is not None:
+            self.data = Transformator.transform_data_by_group(self.data, self.VARIABLES, transform)
 
     def _load_data(self) -> pd.DataFrame:
         """Load data from the specified database."""
@@ -47,6 +60,43 @@ class BivariateAnalysis:
         values = ['normal_bp', 'intermediate_bp', 'high_bp']
         self.data['bp_population'] = np.select(conditions, values, default='unknown')
         return self.data
+
+    def create_simple_regression_plots(self):
+        """Create simple regression plots for each blood pressure population."""
+        # use log transformation for the variables
+        population_groups = self.data['population_group'].unique()
+        os.makedirs('results/simple_regression_plots', exist_ok=True)
+        for population_group in population_groups:
+            already_done_plots = []
+            # Filter data for current bp population
+            population_group_data = self.data[self.data['population_group'] == population_group]
+            if len(population_group_data) == 0:
+                continue
+            for variable in self.VARIABLES:
+                for other_variable in self.VARIABLES:
+                    if variable != other_variable:
+                        already_done = False
+                        for plot in already_done_plots:
+                            if variable in plot and other_variable in plot:
+                                already_done = True
+                                break
+                        if already_done:
+                            continue
+                        done_plots_text = f'{variable}_vs_{other_variable}'
+                        already_done_plots.append(done_plots_text)
+                        # also plot the linear regression line
+                        X = population_group_data[other_variable]
+                        Y = population_group_data[variable]
+                        X = sm.add_constant(X)
+                        model = sm.OLS(Y, X).fit()
+                        predictions = model.predict(X)
+                        plt.plot(X[other_variable], predictions, color='black', linewidth=2)
+                        plt.scatter(population_group_data[other_variable], population_group_data[variable])
+                        plt.xlabel(other_variable)
+                        plt.ylabel(variable)
+                        plt.title(f'{variable} vs {other_variable} - {population_group}')
+                        plt.savefig(f'results/simple_regression_plots/{self.database}_{population_group}_{variable}_vs_{other_variable}_simple_regression.png')
+                        plt.close()
 
     def create_pearson_correlation_heatmaps(self):
         """Create and save correlation heatmaps for each blood pressure population."""
@@ -84,12 +134,12 @@ class BivariateAnalysis:
                         else:
                             p_values[i, j] = 0  # p-value for self correlation
                 
-                # Create mask for non-significant correlations (p > 0.05) and diagonal
-                mask = (p_values > 0.05) | np.eye(n, dtype=bool)
+                # Create mask for non-significant correlations (p > 0.05) and r is less than threshold and diagonal
+                mask = (p_values > 0.05) | (abs(correlation_matrix) < self.pearson_r_threshold) | np.eye(n, dtype=bool)
                 
                 # Set non-significant correlations and diagonal to NaN (will appear white)
                 correlation_matrix_masked = correlation_matrix.copy()
-                correlation_matrix_masked[mask] = np.nan
+                correlation_matrix_masked[mask] = 0
 
                 plt.figure(figsize=(10, 8))
                 
@@ -101,31 +151,33 @@ class BivariateAnalysis:
                         p_val = p_values[i, j]
                         if i == j:  # If on diagonal
                             annot_matrix[i, j] = ''  # Empty annotation for diagonal
-                        elif p_val <= 0.05:  # If significant
-                            annot_matrix[i, j] = f'r={corr_val:.2f}\np={p_val:.10f}'
                         else:
-                            annot_matrix[i, j] = f'ns\np={p_val:.10f}'
-                
+                            # Always show both r and p values
+                            # if <0.001 report as <0.001
+                            p_text = f'{p_val:.4f}' if p_val >= 0.001 else '<0.001'
+                            annot_matrix[i, j] = f'r={corr_val:.2f}\np={p_text}'
+
                 sns.heatmap(
                     correlation_matrix_masked,
                     annot=annot_matrix,  # Use our custom annotation matrix
-                    cmap='coolwarm',  # Color scheme
+                    cmap=self.cmap,  # Color scheme
                     vmin=-1, vmax=1,  # Correlation range
                     center=0,  # Center the colormap at 0
                     square=True,  # Make cells square
                     fmt='',  # Empty format since we're using custom annotations
-                    mask=None,  # Don't mask any values
-                    annot_kws={'size': 8},  # Reduced size to fit both values
+                    annot_kws={'size': self.font_size},  # Reduced size to fit both values
                     linewidths=2,  # Add grid lines with width 2
-                    linecolor='lightgray'  # Set grid color to light gray
+                    linecolor='lightgray',  # Set grid color to light gray
+                    cbar=False,  # Don't show color bar
                 )
+
+                plt.xticks(fontsize=self.font_size)
+                plt.yticks(fontsize=self.font_size)
                 
                 # Use full variable names for labels
                 labels = [self.VARIABLE_MAPPING[var]['full_name'] for var in self.VARIABLES]
-                plt.xticks(np.arange(len(labels)) + 0.5, labels, rotation=45)
-                plt.yticks(np.arange(len(labels)) + 0.5, labels, rotation=0)
-                
-                plt.title(f'Pearson Correlation Heatmap\n{bp_pop.replace("_", " ").title()} - {population_group} n={len(group_data)}\n* ns = non-significant (p > 0.05)')
+                plt.xticks(np.arange(len(labels)) + 0.5, labels)
+                plt.yticks(np.arange(len(labels)) + 0.5, labels)
                 plt.tight_layout()
                 
                 # Save the plot
@@ -178,11 +230,9 @@ class BivariateAnalysis:
                             p_values[i, j] = 0  # p-value for self correlation
                 
                 # Create mask for non-significant correlations (p > 0.05) and diagonal
-                mask = (p_values > 0.05) | np.eye(n, dtype=bool)
-                
-                # Set non-significant correlations and diagonal to NaN (will appear white)
+                mask = (p_values > 0.05) | (abs(correlation_matrix) < self.pearson_r_threshold) | np.eye(n, dtype=bool)
                 correlation_matrix_masked = correlation_matrix.copy()
-                correlation_matrix_masked[mask] = np.nan
+                correlation_matrix_masked[mask] = 0
 
                 plt.figure(figsize=(10, 8))
                 
@@ -194,31 +244,31 @@ class BivariateAnalysis:
                         p_val = p_values[i, j]
                         if i == j:  # If on diagonal
                             annot_matrix[i, j] = ''  # Empty annotation for diagonal
-                        elif p_val <= 0.05:  # If significant
-                            annot_matrix[i, j] = f'r={corr_val:.2f}\np={p_val:.10f}'
                         else:
-                            annot_matrix[i, j] = f'ns\np={p_val:.10f}'
+                            # Always show both r and p values
+                            p_text = f'{p_val:.4f}' if p_val >= 0.001 else '<0.001'
+                            annot_matrix[i, j] = f'r={corr_val:.2f}\np={p_text}'
                 
                 sns.heatmap(
                     correlation_matrix_masked,
                     annot=annot_matrix,  # Use our custom annotation matrix
-                    cmap='coolwarm',  # Color scheme
+                    cmap=self.cmap,  # Color scheme
                     vmin=-1, vmax=1,  # Correlation range
                     center=0,  # Center the colormap at 0
                     square=True,  # Make cells square
                     fmt='',  # Empty format since we're using custom annotations
-                    mask=None,  # Don't mask any values
-                    annot_kws={'size': 8},  # Reduced size to fit both values
+                    annot_kws={'size': self.font_size},  # Reduced size to fit both values
                     linewidths=2,  # Add grid lines with width 2
-                    linecolor='lightgray'  # Set grid color to light gray
+                    linecolor='lightgray',  # Set grid color to light gray
+                    cbar=False
                 )
-                
+                plt.xticks(fontsize=self.font_size)
+                plt.yticks(fontsize=self.font_size)
                 # Use full variable names for labels
                 labels = [self.VARIABLE_MAPPING[var]['full_name'] for var in self.VARIABLES]
-                plt.xticks(np.arange(len(labels)) + 0.5, labels, rotation=45)
-                plt.yticks(np.arange(len(labels)) + 0.5, labels, rotation=0)
+                plt.xticks(np.arange(len(labels)) + 0.5, labels)
+                plt.yticks(np.arange(len(labels)) + 0.5, labels)
                 
-                plt.title(f'Spearman Correlation Heatmap\n{bp_pop.replace("_", " ").title()} - {population_group} n={len(group_data)}\n* ns = non-significant (p > 0.05)')
                 plt.tight_layout()
                 
                 # Save the plot
