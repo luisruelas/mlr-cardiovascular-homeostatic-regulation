@@ -31,17 +31,17 @@ def main():
     # )
     # univariate_analysis.save_results()
 
-    # bivariate_analysis = BivariateAnalysis(
-    #     database=args.database,
-    #     mnv=args.mnv,
-    #     mhv=args.mhv,
-    #     transform=args.transform,
-    #     pearson_r_threshold=args.pearson_r_threshold,
-    # )
+    bivariate_analysis = BivariateAnalysis(
+        database=args.database,
+        mnv=args.mnv,
+        mhv=args.mhv,
+        transform=args.transform,
+        pearson_r_threshold=args.pearson_r_threshold,
+    )
 
-    # bivariate_analysis.create_simple_regression_plots()
-    # bivariate_analysis.create_pearson_correlation_heatmaps()
-    # bivariate_analysis.create_spearman_correlation_heatmaps()
+    bivariate_analysis.create_simple_regression_plots()
+    bivariate_analysis.create_pearson_correlation_heatmaps()
+    bivariate_analysis.create_spearman_correlation_heatmaps()
     multivariate_analysis = MultivariateAnalysis(
         database=args.database,
         mnv=args.mnv,

@@ -14,6 +14,18 @@ import statsmodels.api as sm
 
 class BivariateAnalysis:
     font_size = 18
+
+    # Heatmap style configuration
+    HEATMAP_SIG_BORDER_COLOR = 'black'
+    HEATMAP_SIG_BORDER_WIDTH = 3
+    HEATMAP_R_FONT_SIZE = 16        # r font size for cells >= threshold
+    HEATMAP_R_FONT_SIZE_BELOW = 16  # r font size for cells < threshold
+    HEATMAP_R_FONT_WEIGHT = 'bold'
+    HEATMAP_R_FONT_WEIGHT_BELOW = 'normal'
+    HEATMAP_P_FONT_SIZE = 16        # p font size for cells >= threshold
+    HEATMAP_P_FONT_SIZE_BELOW = 16   # p font size for cells < threshold
+    HEATMAP_P_FONT_WEIGHT = 'bold'
+    HEATMAP_P_FONT_WEIGHT_BELOW = 'normal'
     # Reuse the same variables and mapping from UnivariateAnalysis
     VARIABLES = ['mean_nn', 'sd_nn', 'mean_sbp', 'sd_sbp']
     VARIABLE_MAPPING = {
@@ -60,6 +72,47 @@ class BivariateAnalysis:
         values = ['normal_bp', 'intermediate_bp', 'high_bp']
         self.data['bp_population'] = np.select(conditions, values, default='unknown')
         return self.data
+
+    def _annotate_heatmap(self, ax, correlation_matrix, p_values, mask):
+        """Draw per-cell r and p annotations with independent styling, and borders on significant cells."""
+        mask = np.asarray(mask)
+        n = len(self.VARIABLES)
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                corr_val = correlation_matrix.iloc[i, j]
+                p_val = p_values[i, j]
+                p_text = f'{p_val:.4f}' if p_val >= 0.001 else '<0.001'
+                cx, cy = j + 0.5, i + 0.5
+
+                cor_meets_threshold = corr_val >= self.pearson_r_threshold
+                p_meets_threshold = p_val < 0.05
+
+                r_size = self.HEATMAP_R_FONT_SIZE if cor_meets_threshold else self.HEATMAP_R_FONT_SIZE_BELOW
+                r_weight = self.HEATMAP_R_FONT_WEIGHT if cor_meets_threshold else self.HEATMAP_R_FONT_WEIGHT_BELOW
+                p_size = self.HEATMAP_P_FONT_SIZE if p_meets_threshold else self.HEATMAP_P_FONT_SIZE_BELOW
+                p_weight = self.HEATMAP_P_FONT_WEIGHT if p_meets_threshold else self.HEATMAP_P_FONT_WEIGHT_BELOW
+
+
+                ax.text(cx, cy - 0.15, f'r={corr_val:.2f}',
+                        ha='center', va='center',
+                        fontsize=r_size,
+                        fontweight=r_weight)
+                ax.text(cx, cy + 0.15, f'p={p_text}',
+                        ha='center', va='center',
+                        fontsize=p_size,
+                        fontweight=p_weight)
+
+                if cor_meets_threshold and p_meets_threshold:
+                    ax.add_patch(plt.Rectangle(
+                        (j, i), 1, 1,
+                        fill=False,
+                        edgecolor=self.HEATMAP_SIG_BORDER_COLOR,
+                        linewidth=self.HEATMAP_SIG_BORDER_WIDTH,
+                        zorder=3,
+                        clip_on=False,
+                    ))
 
     def create_simple_regression_plots(self):
         """Create simple regression plots for each blood pressure population."""
@@ -135,41 +188,28 @@ class BivariateAnalysis:
                             p_values[i, j] = 0  # p-value for self correlation
                 
                 # Create mask for non-significant correlations (p > 0.05) and r is less than threshold and diagonal
-                mask = (p_values > 0.05) | (abs(correlation_matrix) < self.pearson_r_threshold) | np.eye(n, dtype=bool)
+                mask = np.eye(n, dtype=bool)
+                # mask = (p_values > 0.05) | (abs(correlation_matrix) < self.pearson_r_threshold) | np.eye(n, dtype=bool)
                 
                 # Set non-significant correlations and diagonal to NaN (will appear white)
                 correlation_matrix_masked = correlation_matrix.copy()
                 correlation_matrix_masked[mask] = 0
 
                 plt.figure(figsize=(10, 8))
-                
-                # Create a custom annotation array that combines correlation and p-values
-                annot_matrix = np.empty((n, n), dtype=object)
-                for i in range(n):
-                    for j in range(n):
-                        corr_val = correlation_matrix.iloc[i, j]
-                        p_val = p_values[i, j]
-                        if i == j:  # If on diagonal
-                            annot_matrix[i, j] = ''  # Empty annotation for diagonal
-                        else:
-                            # Always show both r and p values
-                            # if <0.001 report as <0.001
-                            p_text = f'{p_val:.4f}' if p_val >= 0.001 else '<0.001'
-                            annot_matrix[i, j] = f'r={corr_val:.2f}\np={p_text}'
 
-                sns.heatmap(
+                ax = sns.heatmap(
                     correlation_matrix_masked,
-                    annot=annot_matrix,  # Use our custom annotation matrix
-                    cmap=self.cmap,  # Color scheme
-                    vmin=-1, vmax=1,  # Correlation range
-                    center=0,  # Center the colormap at 0
-                    square=True,  # Make cells square
-                    fmt='',  # Empty format since we're using custom annotations
-                    annot_kws={'size': self.font_size},  # Reduced size to fit both values
-                    linewidths=2,  # Add grid lines with width 2
-                    linecolor='lightgray',  # Set grid color to light gray
-                    cbar=False,  # Don't show color bar
+                    annot=False,
+                    cmap=self.cmap,
+                    vmin=-1, vmax=1,
+                    center=0,
+                    square=True,
+                    fmt='',
+                    linewidths=2,
+                    linecolor='lightgray',
+                    cbar=False,
                 )
+                self._annotate_heatmap(ax, correlation_matrix, p_values, mask)
 
                 plt.xticks(fontsize=self.font_size)
                 plt.yticks(fontsize=self.font_size)
@@ -235,33 +275,21 @@ class BivariateAnalysis:
                 correlation_matrix_masked[mask] = 0
 
                 plt.figure(figsize=(10, 8))
-                
-                # Create a custom annotation array that combines correlation and p-values
-                annot_matrix = np.empty((n, n), dtype=object)
-                for i in range(n):
-                    for j in range(n):
-                        corr_val = correlation_matrix.iloc[i, j]
-                        p_val = p_values[i, j]
-                        if i == j:  # If on diagonal
-                            annot_matrix[i, j] = ''  # Empty annotation for diagonal
-                        else:
-                            # Always show both r and p values
-                            p_text = f'{p_val:.4f}' if p_val >= 0.001 else '<0.001'
-                            annot_matrix[i, j] = f'r={corr_val:.2f}\np={p_text}'
-                
-                sns.heatmap(
+
+                ax = sns.heatmap(
                     correlation_matrix_masked,
-                    annot=annot_matrix,  # Use our custom annotation matrix
-                    cmap=self.cmap,  # Color scheme
-                    vmin=-1, vmax=1,  # Correlation range
-                    center=0,  # Center the colormap at 0
-                    square=True,  # Make cells square
-                    fmt='',  # Empty format since we're using custom annotations
-                    annot_kws={'size': self.font_size},  # Reduced size to fit both values
-                    linewidths=2,  # Add grid lines with width 2
-                    linecolor='lightgray',  # Set grid color to light gray
-                    cbar=False
+                    annot=False,
+                    cmap=self.cmap,
+                    vmin=-1, vmax=1,
+                    center=0,
+                    square=True,
+                    fmt='',
+                    linewidths=2,
+                    linecolor='lightgray',
+                    cbar=False,
                 )
+                self._annotate_heatmap(ax, correlation_matrix, p_values, mask)
+
                 plt.xticks(fontsize=self.font_size)
                 plt.yticks(fontsize=self.font_size)
                 # Use full variable names for labels

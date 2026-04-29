@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple
 import statsmodels.api as sm
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from scripts.src.helpers.coefficient_plotter import CoefficientPlotter
 from .transformator import Transformator
@@ -136,13 +137,19 @@ class MultivariateAnalysis:
                     
                     # Perform regression
                     regression_summary, regression_results = self._perform_multiple_regression(y, X, independent_vars)
-                    
+
+                    # Compute VIF for independent variables (X has no constant here)
+                    vif_data = pd.DataFrame()
+                    vif_data["feature"] = independent_vars
+                    vif_data["VIF"] = [variance_inflation_factor(X, i) for i in range(len(independent_vars))]
+
                     # Store results with variable names
                     results[bp_pop][pop_group][dependent_var] = {
                         'dependent_variable': dependent_var,
                         'independent_variables': independent_vars,
                         'summary': regression_summary,
-                        'results_object': regression_results
+                        'results_object': regression_results,
+                        'vif': vif_data
                     }
         
         return results
@@ -204,9 +211,12 @@ class MultivariateAnalysis:
                         
                         if analysis['summary'] is not None:
                             f.write(analysis['summary'])
+                            f.write("\n\nVIF\n")
+                            f.write(analysis['vif'].to_string(index=False))
+                            f.write("\n")
                         else:
                             f.write("Insufficient data for analysis\n")
-                        
+
                         f.write("\n" + "=" * 80 + "\n\n")
 
 
