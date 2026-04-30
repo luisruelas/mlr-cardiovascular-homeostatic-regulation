@@ -45,8 +45,8 @@ class UnivariateAnalysis:
 
     def _load_data(self) -> pd.DataFrame:
         """Load data from the specified database."""
-        file_path = ('data/clean_databases/population_results_autonomic_aging(20yGroups).csv' 
-                    if self.database == 'aa' else 'data/clean_databases/population_results_bruno.csv')
+        file_path = ('clean_databases/population_results_autonomic_aging(20yGroups).csv' 
+                    if self.database == 'aa' else 'clean_databases/population_results_bruno.csv')
         return pd.read_csv(file_path)
 
     def _create_bp_population(self) -> pd.DataFrame:

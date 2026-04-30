@@ -2,10 +2,10 @@ import argparse
 import os
 import shutil
 
-from scripts.src.helpers.bivariate_analysis import BivariateAnalysis
-from scripts.src.helpers.multivariate_analysis import MultivariateAnalysis
-from scripts.src.helpers.univariate_analysis import UnivariateAnalysis
-# how to run: pipenv run python -m scripts.src.multivariate_analysis --database aa --transform log --mnv 500 --mhv 600 --pearson_r_threshold 0.5
+from helpers.bivariate_analysis import BivariateAnalysis
+from helpers.multivariate_analysis import MultivariateAnalysis
+from helpers.univariate_analysis import UnivariateAnalysis
+
 def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Multivariate analysis for cardiovascular data')
@@ -23,13 +23,13 @@ def parse_arguments() -> argparse.Namespace:
 
 def main():
     args = parse_arguments()
-    # univariate_analysis = UnivariateAnalysis(
-    #     database=args.database,
-    #     mnv=args.mnv,
-    #     mhv=args.mhv,
-    #     transform=args.transform,
-    # )
-    # univariate_analysis.save_results()
+    univariate_analysis = UnivariateAnalysis(
+        database=args.database,
+        mnv=args.mnv,
+        mhv=args.mhv,
+        transform=args.transform,
+    )
+    univariate_analysis.save_results()
 
     bivariate_analysis = BivariateAnalysis(
         database=args.database,
