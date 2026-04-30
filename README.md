@@ -1,4 +1,4 @@
-# Autonomic Nervous System Analysis — Heart Rate and Blood Pressure
+# Univariate, Bivariate, and Multivariate analysis for basic Cardiovascular Variables
 
 This project performs a statistical analysis of cardiovascular time series data to study how heart rate variability and blood pressure relate to each other across different populations. The analysis covers two independent databases and uses univariate, bivariate, and multivariate statistical methods to characterize group differences and detect significant associations.
 
