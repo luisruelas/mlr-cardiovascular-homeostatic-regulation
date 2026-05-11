@@ -14,7 +14,8 @@ import statsmodels.api as sm
 
 class BivariateAnalysis:
     font_size = 18
-
+    AXIS_FONT_SIZE = 24
+    TITLE_FONT_SIZE = 26
     # Heatmap style configuration
     HEATMAP_SIG_BORDER_COLOR = 'black'
     HEATMAP_SIG_BORDER_WIDTH = 3
@@ -38,19 +39,21 @@ class BivariateAnalysis:
     cmap_colors = [(103/255, 169/255, 207/255), (247/255, 247/255, 247/255), (239/255, 138/255, 98/255)]
     cmap = colors.LinearSegmentedColormap.from_list('custom_warm', list(zip(positions, cmap_colors)), N=256)
 
-    def __init__(self, database: str, mnv: float, mhv: float, transform: str = None, pearson_r_threshold: float = 0.5):
+    def __init__(self, database: str, mnv: float, mhv: float, transform: str = None, pearson_r_threshold: float = 0.5, age_group: int = 20):
         """
         Initialize BivariateAnalysis class.
-        
+
         Args:
             database: Database to analyze ('aa' or 'bruno')
             mnv: Maximum normotensive value
             mhv: Minimum hypertensive value
+            age_group: Age grouping to use for AA database (20 or 10)
         """
         self.database = database
         self.mnv = mnv
         self.mhv = mhv
         self.pearson_r_threshold = pearson_r_threshold
+        self.age_group = age_group
         self.data = self._load_data()
         self.data = self._create_bp_population()
         if transform is not None:
@@ -58,8 +61,10 @@ class BivariateAnalysis:
 
     def _load_data(self) -> pd.DataFrame:
         """Load data from the specified database."""
-        file_path = ('clean_databases/population_results_autonomic_aging(20yGroups).csv' 
-                    if self.database == 'aa' else 'clean_databases/population_results_bruno.csv')
+        if self.database == 'aa':
+            file_path = f'clean_databases/population_results_autonomic_aging({self.age_group}yGroups).csv'
+        else:
+            file_path = 'clean_databases/population_results_bruno.csv'
         return pd.read_csv(file_path)
 
     def _create_bp_population(self) -> pd.DataFrame:
@@ -125,8 +130,8 @@ class BivariateAnalysis:
             population_group_data = self.data[self.data['population_group'] == population_group]
             if len(population_group_data) == 0:
                 continue
-            for variable in self.VARIABLES:
-                for other_variable in self.VARIABLES:
+            for other_variable in self.VARIABLES:
+                for variable in self.VARIABLES:
                     if variable != other_variable:
                         already_done = False
                         for plot in already_done_plots:
@@ -140,14 +145,20 @@ class BivariateAnalysis:
                         # also plot the linear regression line
                         X = population_group_data[other_variable]
                         Y = population_group_data[variable]
+                        X = (X - X.mean()) / X.std()
+                        Y = (Y - Y.mean()) / Y.std()
                         X = sm.add_constant(X)
                         model = sm.OLS(Y, X).fit()
                         predictions = model.predict(X)
                         plt.plot(X[other_variable], predictions, color='black', linewidth=2)
-                        plt.scatter(population_group_data[other_variable], population_group_data[variable])
-                        plt.xlabel(other_variable)
-                        plt.ylabel(variable)
-                        plt.title(f'{variable} vs {other_variable} - {population_group}')
+                        plt.scatter(X[other_variable], Y)
+                        xlabel = self.VARIABLE_MAPPING[other_variable]['abv']
+                        ylabel = self.VARIABLE_MAPPING[variable]['abv']
+                        plt.xlim(-3.5, 3.5)
+                        plt.ylim(-3.5, 3.5)
+                        plt.xlabel(xlabel, fontsize=self.AXIS_FONT_SIZE)
+                        plt.ylabel(ylabel, fontsize=self.AXIS_FONT_SIZE)
+                        plt.title(f'{xlabel} vs {ylabel} - {population_group}', fontsize=self.TITLE_FONT_SIZE)
                         plt.savefig(f'results/simple_regression_plots/{self.database}_{population_group}_{variable}_vs_{other_variable}_simple_regression.png')
                         plt.close()
 

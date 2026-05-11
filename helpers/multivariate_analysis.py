@@ -30,18 +30,20 @@ class MultivariateAnalysis:
         'sd_sbp': {'color': 'blue', 'linestyle': '--'},
     }
 
-    def __init__(self, database: str, mnv: float, mhv: float, transform: str = None):
+    def __init__(self, database: str, mnv: float, mhv: float, transform: str = None, age_group: int = 20):
         """
         Initialize MultivariateAnalysis class.
-        
+
         Args:
             database: Database to analyze ('aa' or 'bruno')
             mnv: Maximum normotensive value
             mhv: Minimum hypertensive value
+            age_group: Age grouping to use for AA database (20 or 10)
         """
         self.database = database
         self.mnv = mnv
         self.mhv = mhv
+        self.age_group = age_group
         self.data = self._load_data()
         self.data = self._create_bp_population()
         if transform is not None:
@@ -55,8 +57,10 @@ class MultivariateAnalysis:
 
     def _load_data(self) -> pd.DataFrame:
         """Load data from the specified database."""
-        file_path = ('clean_databases/population_results_autonomic_aging(20yGroups).csv' 
-                    if self.database == 'aa' else 'clean_databases/population_results_bruno.csv')
+        if self.database == 'aa':
+            file_path = f'clean_databases/population_results_autonomic_aging({self.age_group}yGroups).csv'
+        else:
+            file_path = 'clean_databases/population_results_bruno.csv'
         return pd.read_csv(file_path)
 
     def _create_bp_population(self) -> pd.DataFrame:
